@@ -1,0 +1,9 @@
+{
+  "name": "rooftop-run",
+  "version": "1.0.0",
+  "description": "Multiplayer parkour racing game, 50 players per lobby",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "^8.18.0" },
+  "engines": { "node": ">=18" }
+}

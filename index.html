@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#14123a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<title>Rooftop Run</title>
+<style>
+  :root{
+    --night:#14123a; --dusk:#e8467c; --amber:#ffb347; --slab:#2b2a4c; --chalk:#f4efe6;
+    --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+    --safe-l:env(safe-area-inset-left,0px); --safe-r:env(safe-area-inset-right,0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;background:var(--night);color:var(--chalk);overflow:hidden;overscroll-behavior:none;
+    font-family:"Avenir Next Condensed","Arial Narrow","Roboto Condensed",system-ui,sans-serif;touch-action:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+
+  /* HUD */
+  .hud{position:fixed;z-index:2;pointer-events:none;font-weight:700;letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.6)}
+  #stats{top:calc(10px + var(--safe-t));left:calc(12px + var(--safe-l));font-size:18px;display:flex;gap:14px}
+  #stats b{color:var(--amber);font-variant-numeric:tabular-nums}
+  #board{top:calc(10px + var(--safe-t));right:calc(12px + var(--safe-r));font-size:14px;text-align:right;line-height:1.35}
+  #board i{font-style:normal;color:var(--amber)}
+  #toast{top:calc(46px + var(--safe-t));left:50%;transform:translateX(-50%);font-size:20px;white-space:nowrap;
+    opacity:0;transition:opacity .25s}
+  #toast.on{opacity:1}
+
+  /* touch controls */
+  .pad{position:fixed;z-index:3;bottom:calc(18px + var(--safe-b));width:84px;height:84px;border-radius:50%;
+    background:rgba(244,239,230,.14);border:2px solid rgba(244,239,230,.35);color:var(--chalk);
+    font-size:34px;display:flex;align-items:center;justify-content:center;touch-action:none}
+  .pad.down{background:rgba(255,179,71,.45);border-color:var(--amber)}
+  #bl{left:calc(16px + var(--safe-l))} #br{left:calc(116px + var(--safe-l))}
+  #bj{right:calc(18px + var(--safe-r));width:104px;height:104px;font-size:20px;font-weight:800;
+    background:rgba(232,70,124,.28);border-color:rgba(232,70,124,.8)}
+  #bs{right:calc(136px + var(--safe-r));width:54px;height:54px;font-size:22px;bottom:calc(24px + var(--safe-b))}
+  @media (hover:hover) and (pointer:fine){.pad{display:none}}
+
+  /* overlays */
+  .screen{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;
+    background:rgba(20,18,58,.86);padding:16px}
+  .screen.hide{display:none}
+  .card{width:min(420px,100%);}
+  h1{margin:0 0 4px;font-size:clamp(44px,12vw,72px);line-height:.9;font-style:italic;font-weight:900;
+    letter-spacing:-.02em;color:var(--chalk)}
+  h1 span{display:block;color:var(--dusk)}
+  p.sub{margin:10px 0 22px;font-size:17px;opacity:.85}
+  label{display:block;font-size:15px;margin:12px 0 6px;opacity:.9}
+  input{width:100%;font:inherit;font-size:20px;padding:12px 14px;border-radius:10px;border:2px solid #4a4880;
+    background:#1d1b4d;color:var(--chalk);user-select:text;-webkit-user-select:text;touch-action:auto}
+  input:focus{outline:none;border-color:var(--amber)}
+  button.go{margin-top:18px;width:100%;font:inherit;font-size:22px;font-weight:800;padding:14px;border:0;border-radius:12px;
+    background:var(--dusk);color:#fff;cursor:pointer;touch-action:manipulation}
+  button.go:active{background:#c9336a}
+  #err{min-height:22px;margin-top:10px;color:var(--amber);font-size:16px}
+  .tips{margin-top:14px;font-size:14px;opacity:.7;line-height:1.5}
+  #results ol{margin:14px 0 0;padding-left:24px;font-size:20px;line-height:1.5}
+  #results ol li span{float:right;color:var(--amber);font-variant-numeric:tabular-nums}
+  #rot{position:fixed;z-index:4;left:0;right:0;bottom:30%;text-align:center;font-size:18px;display:none;pointer-events:none}
+  @media (orientation:portrait){#rot{display:block}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="stats" class="hud"><span>Players <b id="cnt">–</b></span><span>Time <b id="tm">–</b></span></div>
+<div id="board" class="hud"></div>
+<div id="toast" class="hud"></div>
+<div id="rot">Turn your phone sideways for a wider view</div>
+
+<div id="bl" class="pad">◀</div>
+<div id="br" class="pad">▶</div>
+<div id="bs" class="pad">↺</div>
+<div id="bj" class="pad">JUMP</div>
+
+<div id="menu" class="screen">
+  <div class="card">
+    <h1>Rooftop<span>Run</span></h1>
+    <p class="sub">Race up to 50 players across the skyline. Wall-jump, climb, and reach the flag first.</p>
+    <label for="name">Your name</label>
+    <input id="name" maxlength="14" placeholder="Runner" autocomplete="off">
+    <label for="room">Private room code (optional)</label>
+    <input id="room" maxlength="8" placeholder="Leave empty for a public lobby" autocomplete="off" autocapitalize="characters">
+    <button id="play" class="go">Play</button>
+    <div id="err"></div>
+    <div class="tips">Hold ◀ ▶ to run. Tap JUMP; hold it for a higher jump. Press toward a wall in the air, then tap JUMP to wall-jump. ↺ returns you to your last checkpoint. Keyboard: arrows or WASD, Space, R.</div>
+  </div>
+</div>
+
+<div id="results" class="screen hide">
+  <div class="card">
+    <h1 style="font-size:clamp(34px,9vw,52px)">Round over</h1>
+    <ol id="rlist"></ol>
+    <p class="sub" id="rnext"></p>
+  </div>
+</div>
+
+<script src="level.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d');
+const { PW: W, PH: H, RUN } = LEVEL;
+const LV = LEVEL.build(LEVEL.SEED);
+const plats = LV.plats, cps = LV.cps, FIN = LV.finish, SPAWN = LV.spawn;
+
+/* ---------- state ---------- */
+const G = 2200, JUMP = 800, FALL_MAX = 1400;
+const p = { x: 0, y: 0, vx: 0, vy: 0, onG: false, wall: 0, face: 1, cp: 0, lock: 0, coyote: 0, jbuf: 0, fin: false };
+const inp = { l: false, r: false, j: false, jp: false };
+const remotes = new Map();           // id -> {name,x,y,tx,ty,f,fin}
+let me = { id: 0, name: 'Runner' };
+let ws = null, playing = false, maxPlayers = 50;
+let roundState = 0, timeLeft = 0, count = 0;
+let board = [];
+let runStart = 0;
+const cam = { x: 0, y: 0 };
+
+const color = id => `hsl(${(id * 47) % 360},80%,62%)`;
+const fmt = s => Math.floor(s / 60) + ':' + (s % 60).toFixed(1).padStart(4, '0');
+const toSec = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+
+/* ---------- physics ---------- */
+const approach = (v, t, d) => v < t ? Math.min(v + d, t) : Math.max(v - d, t);
+const hits = (x, y, w, h) => {
+  for (const r of plats) if (x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) return true;
+  return false;
+};
+function collide(axis) {
+  for (const r of plats) {
+    if (p.x < r.x + r.w && p.x + W > r.x && p.y < r.y + r.h && p.y + H > r.y) {
+      if (axis === 'x') {
+        if (p.vx > 0) p.x = r.x - W; else if (p.vx < 0) p.x = r.x + r.w;
+        p.vx = 0;
+      } else {
+        if (p.vy > 0) { p.y = r.y - H; p.onG = true; } else if (p.vy < 0) p.y = r.y + r.h;
+        p.vy = 0;
+      }
+    }
+  }
+}
+function respawn(initial) {
+  const c = cps[p.cp];
+  p.x = initial ? SPAWN.x : c.x; p.y = (initial ? SPAWN.y : c.y) - H;
+  p.vx = p.vy = 0; p.lock = 0; p.wall = 0;
+  if (initial) { p.cp = 0; p.fin = false; runStart = performance.now(); }
+  else send({ t: 'rs', cp: p.cp });
+  cam.x = p.x - 200; cam.y = p.y - 300;
+}
+function step(dt) {
+  const ax = (inp.r ? 1 : 0) - (inp.l ? 1 : 0);
+  if (ax) p.face = ax;
+  if (p.lock > 0) p.lock -= dt;
+  else p.vx = approach(p.vx, ax * RUN, (p.onG ? 3200 : 2400) * dt);
+
+  if (inp.jp) { p.jbuf = 0.12; inp.jp = false; }
+  p.jbuf -= dt;
+  p.coyote = p.onG ? 0.1 : p.coyote - dt;
+  if (p.jbuf > 0) {
+    if (p.coyote > 0) { p.vy = -JUMP; p.jbuf = 0; p.coyote = 0; p.onG = false; }
+    else if (p.wall !== 0) {
+      p.vy = -JUMP * 0.95; p.vx = -p.wall * 170; p.lock = 0.1; p.face = -p.wall;
+      p.jbuf = 0; p.wall = 0;
+    }
+  }
+  // variable jump height
+  if (!inp.j && p.vy < -300) p.vy += G * dt * 1.4;
+  p.vy = Math.min(p.vy + G * dt, FALL_MAX);
+  if (p.wall !== 0 && p.vy > 110) p.vy = 110;      // wall slide
+
+  p.onG = false;
+  p.x += p.vx * dt; collide('x');
+  p.y += p.vy * dt; collide('y');
+
+  // wall contact (only while airborne and pressing into it)
+  p.wall = 0;
+  if (!p.onG) {
+    if (ax < 0 && hits(p.x - 3, p.y + 4, 3, H - 8)) p.wall = -1;
+    else if (ax > 0 && hits(p.x + W, p.y + 4, 3, H - 8)) p.wall = 1;
+  }
+
+  // checkpoints
+  if (p.onG) for (let i = p.cp + 1; i < cps.length; i++) {
+    if (p.x >= cps[i].x && Math.abs(p.y + H - cps[i].y) < 2) { p.cp = i; toast('Checkpoint'); }
+  }
+  if (p.y > cps[p.cp].y + 800) respawn(false);
+
+  // finish
+  if (!p.fin && roundState === 0 && p.x + W > FIN.x && p.x < FIN.x + FIN.w && p.y + H > FIN.y && p.y < FIN.y + FIN.h) {
+    p.fin = true; send({ t: 'fin' });
+  }
+}
+
+/* ---------- networking ---------- */
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+function connect() {
+  me.name = ($('name').value || 'Runner').trim().slice(0, 14);
+  try { localStorage.setItem('rr-name', me.name); } catch (e) {}
+  $('err').textContent = 'Connecting…';
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+  ws.onopen = () => send({ t: 'join', name: me.name, room: $('room').value });
+  ws.onclose = () => {
+    if (playing) { playing = false; $('menu').classList.remove('hide'); }
+    $('err').textContent = 'Connection lost. Tap Play to reconnect.';
+  };
+  ws.onerror = () => { $('err').textContent = 'Could not reach the server.'; };
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    switch (m.t) {
+      case 'welcome':
+        me.id = m.id; maxPlayers = m.max; roundState = m.s; board = m.results || [];
+        remotes.clear(); m.players.forEach(addRemote);
+        $('menu').classList.add('hide'); $('err').textContent = '';
+        playing = true; respawn(true); drawBoard();
+        if (m.room) toast('Room ' + m.room);
+        break;
+      case 'full': $('err').textContent = 'That room is full (' + maxPlayers + '/' + maxPlayers + '). Try another code.'; ws.close(); break;
+      case 'pj': addRemote(m.p); toast(m.p.name + ' joined'); break;
+      case 'pl': remotes.delete(m.id); break;
+      case 'n': {
+        roundState = m.s; timeLeft = m.l; count = m.c;
+        for (const [id, x, y, f, fin] of m.p) {
+          if (id === me.id) continue;
+          const r = remotes.get(id); if (!r) continue;
+          if (r.x === null) { r.x = x; r.y = y; }
+          r.tx = x; r.ty = y; r.f = f; r.fin = fin;
+        }
+        break;
+      }
+      case 'fin':
+        board.push({ n: m.name, t: m.time }); drawBoard();
+        toast(m.id === me.id ? `You finished #${m.rank} · ${fmt(m.time)}` : `${m.name} finished #${m.rank}`);
+        break;
+      case 'end': showResults(m.results); break;
+      case 'reset': board = []; drawBoard(); $('results').classList.add('hide'); respawn(true); break;
+      case 'fix': p.x = m.x; p.y = m.y; p.vx = p.vy = 0; break;
+    }
+  };
+}
+function addRemote(q) { remotes.set(q.id, { name: q.name, x: null, y: 0, tx: 0, ty: 0, f: 1, fin: 0 }); }
+setInterval(() => { if (playing) send({ t: 's', x: Math.round(p.x), y: Math.round(p.y), f: p.face, cp: p.cp }); }, 50);
+
+/* ---------- HUD ---------- */
+let toastTimer = 0;
+function toast(t) {
+  const el = $('toast'); el.textContent = t; el.classList.add('on');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('on'), 2200);
+}
+function drawBoard() {
+  $('board').innerHTML = board.slice(0, 5).map((b, i) => `${i + 1}. ${esc(b.n)} <i>${fmt(b.t)}</i>`).join('<br>');
+}
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function showResults(list) {
+  $('rlist').innerHTML = list.length
+    ? list.map(b => `<li>${esc(b.n)}<span>${fmt(b.t)}</span></li>`).join('')
+    : '<li>Nobody reached the flag this round.</li>';
+  $('results').classList.remove('hide');
+}
+function hud() {
+  $('cnt').textContent = playing ? `${Math.max(count, 1)}/${maxPlayers}` : '–';
+  $('tm').textContent = playing ? toSec(timeLeft) : '–';
+  if (roundState === 1) $('rnext').textContent = `Next round in ${timeLeft}s`;
+}
+
+/* ---------- rendering ---------- */
+let dpr = 1, scale = 1, vw = 0, vh = 0;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  scale = innerWidth > innerHeight ? innerHeight / 600 : innerWidth / 640;
+  vw = innerWidth / scale; vh = innerHeight / scale;
+}
+addEventListener('resize', resize); resize();
+
+const hash = n => { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); };
+function skyline(par, base, col, seed, minH, maxH) {
+  ctx.fillStyle = col;
+  const bw = 90, off = cam.x * par;
+  const first = Math.floor(off / bw) - 1, last = first + Math.ceil(vw / bw) + 3;
+  const horizon = base - cam.y * par * 0.6;
+  for (let i = first; i <= last; i++) {
+    const h = minH + hash(i + seed) * (maxH - minH);
+    ctx.fillRect(i * bw - off, horizon - h, bw - 6, h + 2000);
+  }
+}
+function render() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const g = ctx.createLinearGradient(0, 0, 0, innerHeight);
+  g.addColorStop(0, '#14123a'); g.addColorStop(0.55, '#5b2a6e'); g.addColorStop(1, '#e8467c');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, innerWidth, innerHeight);
+  ctx.scale(scale, scale);
+
+  // camera
+  const tx = p.x - vw * 0.38, ty = p.y - vh * 0.62;
+  cam.x += (tx - cam.x) * 0.12; cam.y += (ty - cam.y) * 0.1;
+
+  skyline(0.25, vh * 0.95, '#2a1d5c', 3, 120, 320);
+  skyline(0.5, vh * 1.05, '#201a4d', 11, 80, 260);
+
+  ctx.save(); ctx.translate(-cam.x, -cam.y);
+  // platforms
+  for (const r of plats) {
+    if (r.x > cam.x + vw + 50 || r.x + r.w < cam.x - 50 || r.y > cam.y + vh + 50 || r.y + r.h < cam.y - 50) continue;
+    ctx.fillStyle = '#2b2a4c'; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = '#ffb347'; ctx.fillRect(r.x, r.y, r.w, 5);
+    ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fillRect(r.x, r.y + 5, r.w, 3);
+  }
+  // checkpoints
+  cps.forEach((c, i) => {
+    if (i === 0) return;
+    ctx.fillStyle = '#f4efe6'; ctx.fillRect(c.x - 1.5, c.y - 54, 3, 54);
+    ctx.fillStyle = i <= p.cp ? '#7dffb0' : '#e8467c';
+    ctx.beginPath(); ctx.moveTo(c.x + 1.5, c.y - 54); ctx.lineTo(c.x + 28, c.y - 44); ctx.lineTo(c.x + 1.5, c.y - 34); ctx.fill();
+  });
+  // finish flag
+  ctx.fillStyle = '#f4efe6'; ctx.fillRect(FIN.x + 38, FIN.y, 4, FIN.h);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+    ctx.fillStyle = (i + j) % 2 ? '#14123a' : '#f4efe6';
+    ctx.fillRect(FIN.x + 42 + i * 10, FIN.y + j * 10, 10, 10);
+  }
+  ctx.font = '700 16px sans-serif'; ctx.textAlign = 'center';
+
+  // remote players
+  const k = Math.min(1, 1 / 60 * 12);
+  for (const [id, r] of remotes) {
+    if (r.x === null) continue;
+    r.x += (r.tx - r.x) * k; r.y += (r.ty - r.y) * k;
+    if (r.x < cam.x - 60 || r.x > cam.x + vw + 60 || r.y < cam.y - 80 || r.y > cam.y + vh + 80) continue;
+    drawRunner(r.x, r.y, r.f, color(id), 0.8);
+    ctx.fillStyle = 'rgba(244,239,230,.85)'; ctx.font = '700 13px sans-serif';
+    ctx.fillText(r.name, r.x + W / 2, r.y - 8);
+  }
+  // me
+  drawRunner(p.x, p.y, p.face, color(me.id || 1), 1, true);
+  ctx.restore();
+}
+function drawRunner(x, y, f, col, a, self) {
+  ctx.globalAlpha = a;
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.roundRect(x, y, W, H, 7); ctx.fill();
+  ctx.fillStyle = '#14123a'; ctx.fillRect(x + (f > 0 ? 14 : 4), y + 9, 8, 6);   // visor
+  if (self) { ctx.strokeStyle = '#f4efe6'; ctx.lineWidth = 2; ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- input ---------- */
+function bindPad(id, down, up) {
+  const el = $(id);
+  const on = e => { e.preventDefault(); el.classList.add('down'); down(); };
+  const off = e => { e.preventDefault(); el.classList.remove('down'); up && up(); };
+  el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); on(e); });
+  el.addEventListener('pointerup', off); el.addEventListener('pointercancel', off); el.addEventListener('lostpointercapture', off);
+}
+bindPad('bl', () => inp.l = true, () => inp.l = false);
+bindPad('br', () => inp.r = true, () => inp.r = false);
+bindPad('bj', () => { inp.j = true; inp.jp = true; }, () => inp.j = false);
+bindPad('bs', () => playing && respawn(false));
+
+const keys = { ArrowLeft: 'l', KeyA: 'l', ArrowRight: 'r', KeyD: 'r', Space: 'j', ArrowUp: 'j', KeyW: 'j' };
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  const k = keys[e.code];
+  if (k) { e.preventDefault(); if (k === 'j' && !inp.j) inp.jp = true; inp[k] = true; }
+  if (e.code === 'KeyR' && playing) respawn(false);
+});
+addEventListener('keyup', e => { const k = keys[e.code]; if (k) inp[k] = false; });
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+$('play').addEventListener('click', connect);
+$('name').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+try { $('name').value = localStorage.getItem('rr-name') || ''; } catch (e) {}
+
+/* ---------- main loop ---------- */
+let last = performance.now(), acc = 0;
+function frame(now) {
+  acc += Math.min(0.1, (now - last) / 1000); last = now;
+  while (acc >= 1 / 60) { if (playing) step(1 / 60); acc -= 1 / 60; }
+  render(); hud();
+  requestAnimationFrame(frame);
+}
+cam.x = 0; cam.y = 300; p.x = SPAWN.x; p.y = SPAWN.y - H;
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
