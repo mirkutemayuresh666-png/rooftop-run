@@ -103,6 +103,7 @@
     <input id="room" maxlength="8" placeholder="Leave empty for a public lobby" autocomplete="off" autocapitalize="characters">
     <button id="play" class="go">Play</button>
     <div id="err"></div>
+    <div id="ver" style="margin-top:6px;font-size:12px;opacity:.5">Version 4 · loading…</div>
     <div class="tips">Hold ◀ ▶ to run. Tap JUMP; hold it for a higher jump. Press toward a wall in the air, then tap JUMP to wall-jump. ↺ returns you to your last checkpoint. Keyboard: arrows or WASD, Space, R.<br><b>TV / remote:</b> D-pad left/right to run, Up or OK to jump, Down to go back to a checkpoint. With a pointer arrow, tap AUTO ▶ once, then you only have to press JUMP. Game controllers work too.</div>
   </div>
 </div>
@@ -119,6 +120,7 @@
 <script>
 (() => {
 'use strict';
+window.addEventListener('error', e => { const el = document.getElementById('err'); if (el) el.textContent = 'Error: ' + (e.message || 'unknown'); });
 if (!CanvasRenderingContext2D.prototype.roundRect) {          // older TV / phone browsers
   CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
     r = Math.min(r || 0, w / 2, h / 2);
@@ -198,19 +200,43 @@ function step(dt) {
 
 /* ---------- networking ---------- */
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+let tries = 0, joinTimer = 0, connecting = false;
 function connect() {
+  if (connecting) return;
+  connecting = true; tries = 0;
   me.name = ($('name').value || 'Runner').trim().slice(0, 14);
   try { localStorage.setItem('rr-name', me.name); } catch (e) {}
-  $('err').textContent = 'Connecting…';
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-  ws.onopen = () => send({ t: 'join', name: me.name, room: $('room').value });
-  ws.onclose = () => {
+  openSocket();
+}
+function retryOrFail() {
+  if (tries < 4) { $('err').textContent = 'Waking the server… (try ' + (tries + 1) + '/4)'; setTimeout(openSocket, 2500); }
+  else { connecting = false; $('err').textContent = 'The server is not answering. Open /health in a new tab, wait a minute, then tap Play again.'; }
+}
+function openSocket() {
+  tries++;
+  if (tries === 1) $('err').textContent = 'Connecting…';
+  let sock;
+  try { sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host); }
+  catch (e) { connecting = false; $('err').textContent = 'Cannot open a connection: ' + e.message; return; }
+  ws = sock; let joined = false;
+  clearTimeout(joinTimer);
+  joinTimer = setTimeout(() => {
+    if (joined || sock !== ws) return;
+    sock.onclose = null; try { sock.close(); } catch (e) {}
+    retryOrFail();
+  }, 15000);
+  sock.onopen = () => send({ t: 'join', name: me.name, room: $('room').value });
+  sock.onerror = () => {};
+  sock.onclose = () => {
+    if (sock !== ws) return;
+    if (!joined) { clearTimeout(joinTimer); retryOrFail(); return; }
+    connecting = false;
     if (playing) { playing = false; $('menu').classList.remove('hide'); }
     $('err').textContent = 'Connection lost. Tap Play to reconnect.';
   };
-  ws.onerror = () => { $('err').textContent = 'Could not reach the server.'; };
-  ws.onmessage = e => {
+  sock.onmessage = e => {
     const m = JSON.parse(e.data);
+    if (m.t === 'welcome' || m.t === 'full') { joined = true; connecting = false; clearTimeout(joinTimer); }
     switch (m.t) {
       case 'welcome':
         me.id = m.id; maxPlayers = m.max; roundState = m.s; board = m.results || [];
@@ -594,14 +620,18 @@ $('play').addEventListener('click', connect);
 $('name').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
 try { $('name').value = localStorage.getItem('rr-name') || ''; } catch (e) {}
 
+$('ver').textContent = 'Version 4 · ready';
+
 /* ---------- main loop ---------- */
 let last = performance.now(), acc = 0;
 function frame(now) {
-  pollPad();
-  const fdt = Math.min(0.1, (now - last) / 1000); acc += fdt; last = now;
-  while (acc >= 1 / 60) { if (playing) step(1 / 60); acc -= 1 / 60; }
-  render(fdt); hud();
   requestAnimationFrame(frame);
+  try {
+    try { pollPad(); } catch (e) {}
+    const fdt = Math.min(0.1, (now - last) / 1000); acc += fdt; last = now;
+    while (acc >= 1 / 60) { if (playing) step(1 / 60); acc -= 1 / 60; }
+    render(fdt); hud();
+  } catch (e) { const el = $('err'); if (el) el.textContent = 'Error: ' + e.message; }
 }
 cam.x = 0; cam.y = 300; p.x = SPAWN.x; p.y = SPAWN.y - H;
 requestAnimationFrame(frame);
